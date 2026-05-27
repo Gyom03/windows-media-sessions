@@ -1,17 +1,21 @@
 name: Release
 
-# Triggers on tags like v1.0.1, v2.3.4-beta.1, ...
-# Workflow: rebuild from clean checkout, verify the tag matches package.json,
-# publish to npm with provenance, then create a GitHub Release with auto-generated
-# notes from the commits since the previous tag.
+# Auto-publish on every push to main, but only if the version in
+# packages/node/package.json has NOT yet been published to npm.
+# To cut a release: bump the version (npm version patch/minor/major), commit,
+# and merge to main. CI does the rest.
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
 
 permissions:
-  contents: write   # required by softprops/action-gh-release to create the Release
-  id-token: write   # required by npm for OIDC provenance attestations
+  contents: write   # for creating the matching GitHub Release/tag
+  id-token: write   # for npm OIDC provenance
+
+# Only one release at a time to avoid double-publishes on rapid pushes.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -19,51 +23,72 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Read package version
+        id: version
+        shell: pwsh
+        run: |
+          $v = (Get-Content packages/node/package.json -Raw | ConvertFrom-Json).version
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "package.json version = $v"
+
+      - name: Check whether this version is already on npm
+        id: check
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $published = npm view "windows-media-sessions@$version" version 2>$null
+          $global:LASTEXITCODE = 0
+          if ($published -eq $version) {
+            Write-Host "::notice::v$version already published, skipping release"
+            "skip=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "::notice::v$version is new, will publish"
+            "skip=false" >> $env:GITHUB_OUTPUT
+          }
+
       - name: Setup .NET 8 SDK
+        if: steps.check.outputs.skip == 'false'
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
       - name: Setup Node 20
+        if: steps.check.outputs.skip == 'false'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          # Setting registry-url makes setup-node write an .npmrc with the
-          # auth token, which `npm publish` then picks up automatically.
           registry-url: 'https://registry.npmjs.org/'
           cache: 'npm'
 
       - name: Install dependencies
+        if: steps.check.outputs.skip == 'false'
         run: npm install --no-audit --no-fund
 
       - name: Test
+        if: steps.check.outputs.skip == 'false'
         run: npm test
 
       - name: Build .NET backend
+        if: steps.check.outputs.skip == 'false'
         shell: pwsh
         run: ./scripts/build-backend.ps1
 
       - name: Build TypeScript package
+        if: steps.check.outputs.skip == 'false'
         run: npm --workspace packages/node run build
 
-      - name: Verify tag matches package.json version
-        shell: pwsh
-        run: |
-          $tag = "${{ github.ref_name }}" -replace '^v',''
-          $pkg = (Get-Content packages/node/package.json -Raw | ConvertFrom-Json).version
-          if ($tag -ne $pkg) {
-            throw "Tag version ($tag) does not match package.json version ($pkg). Run npm version <bump> before tagging."
-          }
-          Write-Host "Tag $tag matches package.json"
-
       - name: Publish to npm
+        if: steps.check.outputs.skip == 'false'
         working-directory: packages/node
         run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Create GitHub Release
+      - name: Create matching git tag + GitHub Release
+        if: steps.check.outputs.skip == 'false'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
           generate_release_notes: true
           files: packages/node/bin/win-x64/windows-media-sessions-backend.exe
