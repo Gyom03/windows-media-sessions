@@ -1,29 +1,83 @@
-name: Release
+name: CI / Release
 
-# Auto-publish on every push to main, but only if the version in
-# packages/node/package.json has NOT yet been published to npm.
-# To cut a release: bump the version (npm version patch/minor/major), commit,
-# and merge to main. CI does the rest.
+# Single pipeline for both validation and publish:
+#   - PR  → lint + typecheck + test + build (no publish)
+#   - push to main → same checks + publish if package.json version is new
+#
+# Filename stays "release.yml" so the existing npm Trusted Publisher config
+# (which is bound to this exact filename) keeps working.
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 permissions:
-  contents: write   # for creating the matching GitHub Release/tag
-  id-token: write   # for npm OIDC provenance
+  contents: write   # for creating the GitHub Release/tag on publish
+  id-token: write   # for npm OIDC trusted publishing + provenance
 
-# Only one release at a time to avoid double-publishes on rapid pushes.
+# PR pushes cancel previous in-progress runs of that same PR.
+# Main pushes never cancel each other — release safety.
 concurrency:
-  group: release
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  release:
+  build:
+    name: Build, test${{ github.event_name == 'push' && ', publish if new' || '' }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org/'
+          cache: 'npm'
+
+      # Trusted Publishing requires npm 11.5.1+. Only relevant on push to main.
+      - name: Upgrade npm for OIDC trusted publishing
+        if: github.event_name == 'push'
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm --workspace packages/node run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build .NET backend
+        shell: pwsh
+        run: ./scripts/build-backend.ps1
+
+      - name: Build TypeScript package
+        run: npm --workspace packages/node run build
+
+      - name: Verify package contents
+        working-directory: packages/node
+        shell: pwsh
+        run: |
+          npm pack --dry-run
+          if (-not (Test-Path 'bin/win-x64/windows-media-sessions-backend.exe')) {
+            throw 'Backend executable missing from bin/'
+          }
+
+      # ───── Publish gate (push-to-main only) ───────────────────────────────
+
       - name: Read package version
+        if: github.event_name == 'push'
         id: version
         shell: pwsh
         run: |
@@ -32,6 +86,7 @@ jobs:
           Write-Host "package.json version = $v"
 
       - name: Check whether this version is already on npm
+        if: github.event_name == 'push'
         id: check
         shell: pwsh
         run: |
@@ -39,60 +94,20 @@ jobs:
           $published = npm view "windows-media-sessions@$version" version 2>$null
           $global:LASTEXITCODE = 0
           if ($published -eq $version) {
-            Write-Host "::notice::v$version already published, skipping release"
+            Write-Host "::notice::v$version already published, skipping publish step"
             "skip=true" >> $env:GITHUB_OUTPUT
           } else {
             Write-Host "::notice::v$version is new, will publish"
             "skip=false" >> $env:GITHUB_OUTPUT
           }
 
-      - name: Setup .NET 8 SDK
-        if: steps.check.outputs.skip == 'false'
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Setup Node 20
-        if: steps.check.outputs.skip == 'false'
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org/'
-          cache: 'npm'
-
-      # Trusted Publishing requires npm 11.5.1+, but Node 20 ships an older
-      # npm. Upgrade before any npm command runs.
-      - name: Upgrade npm to 11.5+ for OIDC trusted publishing
-        if: steps.check.outputs.skip == 'false'
-        run: npm install -g npm@latest
-
-      - name: Install dependencies
-        if: steps.check.outputs.skip == 'false'
-        run: npm install --no-audit --no-fund
-
-      - name: Test
-        if: steps.check.outputs.skip == 'false'
-        run: npm test
-
-      - name: Build .NET backend
-        if: steps.check.outputs.skip == 'false'
-        shell: pwsh
-        run: ./scripts/build-backend.ps1
-
-      - name: Build TypeScript package
-        if: steps.check.outputs.skip == 'false'
-        run: npm --workspace packages/node run build
-
-      # No NODE_AUTH_TOKEN: Trusted Publishing exchanges the GitHub OIDC token
-      # for a short-lived npm publish token automatically. --provenance is
-      # generated for free since we already have id-token: write permission.
       - name: Publish to npm (Trusted Publishing OIDC)
-        if: steps.check.outputs.skip == 'false'
+        if: github.event_name == 'push' && steps.check.outputs.skip == 'false'
         working-directory: packages/node
         run: npm publish --access public --provenance
 
       - name: Create matching git tag + GitHub Release
-        if: steps.check.outputs.skip == 'false'
+        if: github.event_name == 'push' && steps.check.outputs.skip == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
