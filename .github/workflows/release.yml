@@ -60,6 +60,12 @@ jobs:
           registry-url: 'https://registry.npmjs.org/'
           cache: 'npm'
 
+      # Trusted Publishing requires npm 11.5.1+, but Node 20 ships an older
+      # npm. Upgrade before any npm command runs.
+      - name: Upgrade npm to 11.5+ for OIDC trusted publishing
+        if: steps.check.outputs.skip == 'false'
+        run: npm install -g npm@latest
+
       - name: Install dependencies
         if: steps.check.outputs.skip == 'false'
         run: npm install --no-audit --no-fund
@@ -77,12 +83,13 @@ jobs:
         if: steps.check.outputs.skip == 'false'
         run: npm --workspace packages/node run build
 
-      - name: Publish to npm
+      # No NODE_AUTH_TOKEN: Trusted Publishing exchanges the GitHub OIDC token
+      # for a short-lived npm publish token automatically. --provenance is
+      # generated for free since we already have id-token: write permission.
+      - name: Publish to npm (Trusted Publishing OIDC)
         if: steps.check.outputs.skip == 'false'
         working-directory: packages/node
         run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create matching git tag + GitHub Release
         if: steps.check.outputs.skip == 'false'
