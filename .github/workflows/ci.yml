@@ -1,8 +1,8 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
+  # Only run on PRs — pushes to main are handled by release.yml which
+  # already runs tests + build before publishing.
   pull_request:
     branches: [main]
 
