@@ -2,6 +2,15 @@
   "name": "windows-media-sessions",
   "version": "1.0.0",
   "description": "Read Windows Global System Media Transport Controls (GSMTC / SMTC) sessions from Node.js. Pure stdio bridge to a self-contained .NET 8 backend — no native addons.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Gyom03/windows-media-sessions.git",
+    "directory": "packages/node"
+  },
+  "bugs": {
+    "url": "https://github.com/Gyom03/windows-media-sessions/issues"
+  },
+  "homepage": "https://github.com/Gyom03/windows-media-sessions#readme",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
