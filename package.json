@@ -1,0 +1,25 @@
+{
+  "name": "windows-media-sessions-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Monorepo for windows-media-sessions: TypeScript npm package + .NET 8 backend that bridges the Windows GSMTC (SMTC) API.",
+  "workspaces": [
+    "packages/node"
+  ],
+  "scripts": {
+    "build:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-backend.ps1",
+    "build:node": "npm --workspace packages/node run build",
+    "build": "npm run build:backend && npm run build:node",
+    "test": "npm --workspace packages/node run test",
+    "lint": "npm --workspace packages/node run lint",
+    "format": "prettier --write .",
+    "publish:node": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/publish.ps1"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

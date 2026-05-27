@@ -1,0 +1,42 @@
+# Node
+node_modules/
+dist/
+.npm/
+*.log
+.pnpm-debug.log*
+npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# .NET
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.dll
+*.pdb
+
+# Backend publish artifacts (these are produced by build:backend)
+packages/node/bin/
+
+# Test/coverage
+coverage/
+.vitest-cache/
+
+# IDE
+.vs/
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.tgz
+.env
+.env.local
+.claude

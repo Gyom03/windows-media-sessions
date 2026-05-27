@@ -1,0 +1,6 @@
+node_modules
+dist
+bin
+obj
+coverage
+packages/node/bin
