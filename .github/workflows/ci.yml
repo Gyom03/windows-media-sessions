@@ -24,22 +24,17 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: packages/node/package-lock.json
 
-      - name: Install Node dependencies
-        working-directory: packages/node
+      - name: Install dependencies (workspace root)
         run: npm install --no-audit --no-fund
 
       - name: Lint
-        working-directory: packages/node
         run: npm run lint
 
       - name: Typecheck
-        working-directory: packages/node
-        run: npm run typecheck
+        run: npm --workspace packages/node run typecheck
 
       - name: Test
-        working-directory: packages/node
         run: npm test
 
       - name: Build .NET backend
@@ -47,8 +42,7 @@ jobs:
         run: ./scripts/build-backend.ps1
 
       - name: Build TypeScript package
-        working-directory: packages/node
-        run: npm run build
+        run: npm --workspace packages/node run build
 
       - name: Verify package contents
         working-directory: packages/node
