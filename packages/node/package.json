@@ -1,6 +1,6 @@
 {
   "name": "windows-media-sessions",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Read Windows Global System Media Transport Controls (GSMTC / SMTC) sessions from Node.js. Pure stdio bridge to a self-contained .NET 8 backend — no native addons.",
   "repository": {
     "type": "git",

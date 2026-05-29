@@ -177,17 +177,11 @@ internal sealed class SessionService : IAsyncDisposable
         }
 
         string? dataUrl = null;
-        if (props is null)
-        {
-            Error?.Invoke(new Exception($"[{sessionId}] thumbnail: media properties were null"));
-        }
-        else if (props.Thumbnail is not { } thumbRef)
-        {
-            // The app does not expose a thumbnail through GSMTC. Normal for
-            // some browsers/PWAs/OBS. We emit once per track via the cache.
-            Error?.Invoke(new Exception($"[{sessionId}] thumbnail: source app did not provide one (props.Thumbnail == null)"));
-        }
-        else
+        // A null props, or a source app that exposes no thumbnail through GSMTC,
+        // is entirely normal: many browsers/PWAs/OBS never provide one, and any
+        // app reports none while it's tearing down (e.g. Spotify on quit). This
+        // is not a diagnostic or an error — we just report a null thumbnail.
+        if (props?.Thumbnail is { } thumbRef)
         {
             dataUrl = await ReadThumbnailDataUrlAsync(thumbRef);
         }

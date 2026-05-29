@@ -92,6 +92,80 @@ describe('SessionManager (integration with fake backend)', () => {
     expect(received).toContain(1);
   });
 
+  it('routes non-fatal backend errors to diagnostic, never error, and keeps the feed alive', async () => {
+    const script = makeScript([
+      JSON.stringify({ type: 'ready', version: '1.0.0', protocol: 1 }),
+      JSON.stringify({ type: 'sessions', sessions: [] }),
+      // A non-fatal diagnostic (e.g. an app quitting without a thumbnail).
+      JSON.stringify({
+        type: 'error',
+        message: '[Spotify] thumbnail: source app did not provide one',
+        fatal: false,
+      }),
+      'DELAY:20',
+      // The feed must keep flowing after the diagnostic.
+      JSON.stringify({
+        type: 'sessions',
+        sessions: [{ id: 'A', sourceAppUserModelId: 'A', playbackStatus: 'paused' }],
+        currentSessionId: 'A',
+      }),
+    ]);
+    scriptDir = script;
+
+    manager = new SessionManager({
+      backendPath: process.execPath,
+      spawnArgs: [fakeBackend],
+      notifyDebounceMs: 5,
+    });
+    Object.assign(process.env, { FAKE_BACKEND_SCRIPT: script });
+
+    const errors: Error[] = [];
+    const diagnostics: Error[] = [];
+    manager.on('error', (e) => errors.push(e));
+    manager.on('diagnostic', (e) => diagnostics.push(e));
+
+    const received: number[] = [];
+    manager.onSessionsChanged((sessions) => received.push(sessions.length));
+    await manager.getAllSessions();
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(diagnostics.some((e) => /thumbnail/i.test(e.message))).toBe(true);
+    expect(errors).toHaveLength(0);
+    // The post-diagnostic snapshot still arrived → the read loop survived.
+    expect(received).toContain(1);
+  });
+
+  it('does not throw when a non-fatal error arrives with no error listener', async () => {
+    const script = makeScript([
+      JSON.stringify({ type: 'ready', version: '1.0.0', protocol: 1 }),
+      JSON.stringify({ type: 'sessions', sessions: [] }),
+      JSON.stringify({ type: 'error', message: 'no thumbnail', fatal: false }),
+      'DELAY:20',
+      JSON.stringify({
+        type: 'sessions',
+        sessions: [{ id: 'A', sourceAppUserModelId: 'A', playbackStatus: 'paused' }],
+        currentSessionId: 'A',
+      }),
+    ]);
+    scriptDir = script;
+
+    manager = new SessionManager({
+      backendPath: process.execPath,
+      spawnArgs: [fakeBackend],
+      notifyDebounceMs: 5,
+    });
+    Object.assign(process.env, { FAKE_BACKEND_SCRIPT: script });
+
+    // Deliberately attach NO 'error' listener — this is the scenario that used
+    // to throw inside the stdout handler and kill the session feed.
+    const received: number[] = [];
+    manager.onSessionsChanged((sessions) => received.push(sessions.length));
+    await manager.getAllSessions();
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(received).toContain(1);
+  });
+
   it('rejects a protocol mismatch with an error event', async () => {
     const script = makeScript([
       JSON.stringify({ type: 'ready', version: '1.0.0', protocol: 999 }),

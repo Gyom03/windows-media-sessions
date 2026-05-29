@@ -22,7 +22,18 @@ export interface SessionManagerOptions extends BackendProcessOptions {
 
 interface SessionManagerEvents {
   sessionsChanged: (sessions: readonly MediaSession[]) => void;
+  /**
+   * A genuine, fatal backend failure (e.g. the backend could not start). The
+   * session feed is no longer reliable when this fires.
+   */
   error: (err: Error) => void;
+  /**
+   * A non-fatal backend diagnostic — e.g. an app that exposes no thumbnail, or
+   * a transient read failure for a single session. These are informational and
+   * the session feed keeps working. Routed to a dedicated event (not `error`)
+   * so they can never crash a host that didn't subscribe to errors.
+   */
+  diagnostic: (err: Error) => void;
 }
 
 /**
@@ -58,7 +69,10 @@ export class SessionManager extends EventEmitter {
         this.resolveFirstSnapshot = null;
         this.notify(this.cache);
       } else if (msg.type === 'error') {
-        this.emit('error', new Error(msg.message));
+        // Respect the backend's `fatal` flag. Non-fatal diagnostics (a missing
+        // thumbnail when an app quits, a one-off read failure, ...) must never
+        // be emitted on the `error` event — see reportError for why.
+        this.reportError(new Error(msg.message), msg.fatal ?? false);
       }
     });
 
@@ -68,11 +82,40 @@ export class SessionManager extends EventEmitter {
       this.firstSnapshotPromise = null;
       this.hasSnapshot = false;
       if (code !== 0 && code !== null) {
-        this.emit('error', new Error(`Backend exited with code ${code} (signal=${signal ?? 'none'})`));
+        this.reportError(
+          new Error(`Backend exited with code ${code} (signal=${signal ?? 'none'})`),
+          true,
+        );
       }
     });
 
-    this.backend.on('error', (err) => this.emit('error', err));
+    this.backend.on('error', (err) => this.reportError(err, true));
+  }
+
+  /**
+   * Surface a backend problem without ever taking the host process down.
+   *
+   * Node's EventEmitter throws synchronously when an `error` event is emitted
+   * with no registered listener. We emit from inside the backend's stdout
+   * `data` handler, so that throw would unwind the read loop and silently kill
+   * the session feed — exactly the "the API stops working after an error" bug.
+   *
+   *   - Non-fatal diagnostics go to the dedicated `diagnostic` event. Emitting
+   *     a non-`error` event with no listener is a harmless no-op.
+   *   - Fatal errors still use `error`, but when nobody is listening we fall
+   *     back to `process.emitWarning` instead of throwing, so an un-subscribed
+   *     consumer degrades gracefully rather than crashing.
+   */
+  private reportError(err: Error, fatal: boolean): void {
+    if (!fatal) {
+      this.emit('diagnostic', err);
+      return;
+    }
+    if (this.listenerCount('error') > 0) {
+      this.emit('error', err);
+    } else {
+      process.emitWarning(err.message, 'WindowsMediaSessionsError');
+    }
   }
 
   override on<E extends keyof SessionManagerEvents>(event: E, listener: SessionManagerEvents[E]): this {
